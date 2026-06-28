@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Chat Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+ 
+<div class="layout">
+ 
+  <!-- ═══ LEFT SIDEBAR ═══ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-name">PDF<span>Chat</span></h1>
+        <p class="brand-sub">RAG-powered document Q&A</p>
+      </div>
+    </div>
+ 
+    <!-- Upload Zone -->
+    <div class="section-label">New Document</div>
+    <div class="upload-zone" id="uploadZone">
+      <div class="upload-icon-wrap">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <polyline points="16 16 12 12 8 16"/>
+          <line x1="12" y1="12" x2="12" y2="21"/>
+          <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+        </svg>
+      </div>
+      <p class="upload-title">Drop your PDF here</p>
+      <p class="upload-sub">or click to browse</p>
+      <input type="file" id="pdfInput" accept=".pdf" hidden>
+    </div>
+ 
+    <div class="file-preview" id="filePreview" style="display:none">
+      <div class="file-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+      </div>
+      <div class="file-meta">
+        <span class="file-name" id="previewName"></span>
+        <span class="file-size" id="previewSize"></span>
+      </div>
+      <button class="file-clear" id="fileClear">✕</button>
+    </div>
+ 
+    <button class="btn-primary" id="uploadBtn" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+      </svg>
+      <span id="uploadBtnText">Upload & Process PDF</span>
+    </button>
+ 
+    <div class="toast" id="toast" style="display:none">
+      <span class="toast-dot" id="toastDot"></span>
+      <span id="toastText"></span>
+    </div>
+ 
+    <div class="pdf-stats" id="pdfStats" style="display:none">
+      <div class="stat"><span class="stat-label">File</span><span class="stat-val" id="statFile"></span></div>
+      <div class="stat"><span class="stat-label">Chunks</span><span class="stat-val accent" id="statChunks"></span></div>
+      <div class="stat"><span class="stat-label">Status</span><span class="stat-val success">Indexed ✓</span></div>
+    </div>
+ 
+    <!-- Session History -->
+    <div class="section-label" style="margin-top:8px">
+      Session History
+      <button class="refresh-btn" id="refreshSessions" title="Refresh">↻</button>
+    </div>
+    <div class="sessions-list" id="sessionsList">
+      <div class="sessions-empty">No past sessions yet</div>
+    </div>
+ 
+    <!-- How it works -->
+    <div class="how-it-works">
+      <div class="section-label">How RAG works</div>
+      <div class="rag-steps">
+        <div class="rag-step"><div class="step-badge">1</div><span>PDF → text chunks</span></div>
+        <div class="rag-step-arrow">↓</div>
+        <div class="rag-step"><div class="step-badge">2</div><span>Chunks → embeddings</span></div>
+        <div class="rag-step-arrow">↓</div>
+        <div class="rag-step"><div class="step-badge">3</div><span>Query → FAISS search</span></div>
+        <div class="rag-step-arrow">↓</div>
+        <div class="rag-step"><div class="step-badge">4</div><span>Top chunks → LLaMA 3</span></div>
+        <div class="rag-step-arrow">↓</div>
+        <div class="rag-step"><div class="step-badge">5</div><span>Grounded answer</span></div>
+      </div>
+    </div>
+ 
+  </aside>
+ 
+  <!-- ═══ MAIN CHAT ═══ -->
+  <main class="chat-main">
+ 
+    <!-- Header -->
+    <header class="chat-header">
+      <div class="header-left">
+        <div class="header-dot" id="headerDot"></div>
+        <span class="header-title" id="headerTitle">No document loaded</span>
+      </div>
+      <div class="header-right">
+        <span class="model-chip">
+          <span class="chip-dot"></span>
+          LLaMA 3.3 70B · Groq
+        </span>
+        <button class="icon-btn" id="clearChatBtn" title="Clear chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+            <path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+ 
+    <!-- Messages -->
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <div class="welcome-gfx">
+          <div class="welcome-circle c1"></div>
+          <div class="welcome-circle c2"></div>
+          <div class="welcome-circle c3"></div>
+          <svg class="welcome-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 8v4l3 3"/>
+          </svg>
+        </div>
+        <h2>Ask anything about your PDF</h2>
+        <p>Upload a document on the left to get started. I'll use RAG to find relevant sections and answer your questions accurately.</p>
+        <div class="sample-qs" id="sampleQs" style="display:none">
+          <p class="sample-label">Try asking:</p>
+          <div class="sample-chips">
+            <button class="sample-chip" onclick="fillQ('What is this document about?')">What is this document about?</button>
+            <button class="sample-chip" onclick="fillQ('Summarize the key points')">Summarize the key points</button>
+            <button class="sample-chip" onclick="fillQ('What are the main skills listed?')">What are the main skills listed?</button>
+          </div>
+        </div>
+      </div>
+    </div>
+ 
+    <!-- Input bar -->
+    <div class="input-bar">
+      <div class="sources-row" id="sourcesRow" style="display:none">
+        <label class="toggle-label">
+          <input type="checkbox" id="showSources" checked>
+          <span>Show source chunks</span>
+        </label>
+      </div>
+      <div class="input-wrap">
+        <textarea id="qInput" placeholder="Ask a question about your PDF..." rows="1" disabled></textarea>
+        <button class="send-btn" id="sendBtn" disabled aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+      <p class="input-hint">Press Enter to send · Shift+Enter for new line</p>
+    </div>
+ 
+  </main>
+ 
+</div>
+ 
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let sessionId = null;
+let pdfReady  = false;
+let selectedFile = null;
+ 
+// ─── DOM ─────────────────────────────────────────────────────────────────────
+const uploadZone   = document.getElementById('uploadZone');
+const pdfInput     = document.getElementById('pdfInput');
+const filePreview  = document.getElementById('filePreview');
+const previewName  = document.getElementById('previewName');
+const previewSize  = document.getElementById('previewSize');
+const fileClear    = document.getElementById('fileClear');
+const uploadBtn    = document.getElementById('uploadBtn');
+const uploadBtnText= document.getElementById('uploadBtnText');
+const toast        = document.getElementById('toast');
+const toastDot     = document.getElementById('toastDot');
+const toastText    = document.getElementById('toastText');
+const pdfStats     = document.getElementById('pdfStats');
+const statFile     = document.getElementById('statFile');
+const statChunks   = document.getElementById('statChunks');
+const sessionsList = document.getElementById('sessionsList');
+const messages     = document.getElementById('messages');
+const welcome      = document.getElementById('welcome');
+const qInput       = document.getElementById('qInput');
+const sendBtn      = document.getElementById('sendBtn');
+const sourcesRow   = document.getElementById('sourcesRow');
+const headerDot    = document.getElementById('headerDot');
+const headerTitle  = document.getElementById('headerTitle');
+ 
+// ─── File selection ──────────────────────────────────────────────────────────
+uploadZone.addEventListener('click', () => pdfInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f && f.name.endsWith('.pdf')) selectFile(f);
+});
+pdfInput.addEventListener('change', () => { if (pdfInput.files[0]) selectFile(pdfInput.files[0]); });
+fileClear.addEventListener('click', () => { selectedFile = null; filePreview.style.display = 'none'; uploadZone.style.display = 'flex'; uploadBtn.disabled = true; pdfInput.value = ''; });
+ 
+function selectFile(f) {
+  selectedFile = f;
+  previewName.textContent = f.name;
+  previewSize.textContent = (f.size / 1024 / 1024).toFixed(2) + ' MB';
+  filePreview.style.display = 'flex';
+  uploadZone.style.display = 'none';
+  uploadBtn.disabled = false;
+}
+ 
+// ─── Upload ──────────────────────────────────────────────────────────────────
+uploadBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  const fd = new FormData();
+  fd.append('pdf', selectedFile);
+  showToast('processing', 'Processing PDF…');
+  uploadBtn.disabled = true;
+  uploadBtnText.textContent = 'Processing…';
+ 
+  try {
+    const res  = await fetch('/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) {
+      showToast('error', data.error);
+    } else {
+      sessionId = data.session_id;
+      showToast('success', '✓ PDF processed and indexed');
+      statFile.textContent   = data.filename.length > 20 ? data.filename.slice(0,20)+'…' : data.filename;
+      statChunks.textContent = data.chunks + ' chunks';
+      pdfStats.style.display = 'block';
+      setPdfReady(true, data.filename);
+      loadSessions();
+      clearWelcome();
+      appendMsg('assistant', `**${data.filename}** processed into **${data.chunks} chunks** and indexed with FAISS. Ask me anything!`);
+      document.getElementById('sampleQs').style.display = 'block';
+    }
+  } catch(e) {
+    showToast('error', 'Upload failed — is Flask running?');
+  }
+  uploadBtnText.textContent = 'Upload & Process PDF';
+  uploadBtn.disabled = false;
+});
+ 
+// ─── Sessions ────────────────────────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const data = await fetch('/sessions').then(r => r.json());
+    if (!data.length) { sessionsList.innerHTML = '<div class="sessions-empty">No past sessions yet</div>'; return; }
+    sessionsList.innerHTML = data.map(s => `
+      <div class="session-item ${s.id === sessionId ? 'active' : ''}" data-id="${s.id}">
+        <div class="session-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </div>
+        <div class="session-info">
+          <span class="session-name">${s.pdf_name.length > 22 ? s.pdf_name.slice(0,22)+'…' : s.pdf_name}</span>
+          <span class="session-meta">${s.message_count} Q&A · ${s.chunk_count} chunks</span>
+        </div>
+        <button class="session-del" data-id="${s.id}" title="Delete">✕</button>
+      </div>
+    `).join('');
+ 
+    sessionsList.querySelectorAll('.session-item').forEach(el => {
+      el.addEventListener('click', e => { if (!e.target.classList.contains('session-del')) loadSession(+el.dataset.id); });
+    });
+    sessionsList.querySelectorAll('.session-del').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); deleteSession(+btn.dataset.id); });
+    });
+  } catch(e) {}
+}
+ 
+async function loadSession(id) {
+  const res  = await fetch(`/sessions/${id}/messages`).then(r => r.json());
+  sessionId  = id;
+  const msgs = res.messages;
+  if (!msgs.length) return;
+ 
+  clearMessages();
+  msgs.forEach(m => appendMsg(m.role, m.content, m.role === 'assistant' ? m.sources : []));
+  setPdfReady(res.loaded, msgs[0]?.content?.split('**')[1] || 'Document');
+  loadSessions();
+  if (!res.loaded) appendMsg('assistant', '⚠️ History loaded. Please re-upload this PDF to ask new questions (server was restarted).');
+}
+ 
+async function deleteSession(id) {
+  await fetch(`/sessions/${id}`, { method: 'DELETE' });
+  if (id === sessionId) { sessionId = null; setPdfReady(false, null); clearMessages(); }
+  loadSessions();
+}
+ 
+document.getElementById('refreshSessions').addEventListener('click', loadSessions);
+ 
+// ─── Ask ─────────────────────────────────────────────────────────────────────
+sendBtn.addEventListener('click', sendQ);
+qInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQ(); } });
+ 
+async function sendQ() {
+  const q = qInput.value.trim();
+  if (!q || !pdfReady) return;
+  clearWelcome();
+  appendMsg('user', q);
+  qInput.value = '';
+  qInput.style.height = 'auto';
+  const thinking = addThinking();
+ 
+  try {
+    const res  = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q, session_id: sessionId })
+    });
+    const data = await res.json();
+    thinking.remove();
+    const showSrc = document.getElementById('showSources').checked;
+    appendMsg('assistant', data.error ? `❌ ${data.error}` : data.answer, showSrc && !data.error ? data.sources : []);
+    loadSessions();
+  } catch(e) {
+    thinking.remove();
+    appendMsg('assistant', '❌ Could not reach Flask backend.');
+  }
+}
+ 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function setPdfReady(ready, name) {
+  pdfReady = ready;
+  qInput.disabled   = !ready;
+  sendBtn.disabled  = !ready;
+  sourcesRow.style.display = ready ? 'flex' : 'none';
+  headerDot.className = 'header-dot' + (ready ? ' online' : '');
+  headerTitle.textContent = name || 'No document loaded';
+  if (ready) qInput.placeholder = `Ask anything about "${name}"…`;
+}
+ 
+function clearWelcome() {
+  if (welcome) welcome.remove();
+}
+ 
+function clearMessages() {
+  messages.innerHTML = '';
+}
+ 
+function appendMsg(role, text, sources = []) {
+  const wrap = document.createElement('div');
+  wrap.className = `msg ${role}`;
+ 
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.innerHTML = formatMd(text);
+ 
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  meta.textContent = role === 'user' ? 'You' : '🤖 PDF Agent';
+ 
+  wrap.appendChild(meta);
+  wrap.appendChild(bubble);
+ 
+  if (sources && sources.length) {
+    const srcWrap = document.createElement('div');
+    srcWrap.className = 'sources-wrap';
+    srcWrap.innerHTML = `
+      <button class="src-toggle" onclick="this.nextElementSibling.classList.toggle('open')">
+        📎 ${sources.length} source chunks used <span>▾</span>
+      </button>
+      <div class="src-list">
+        ${sources.map((s,i) => `<div class="src-chunk"><span class="src-n">Chunk ${i+1}</span>${s.slice(0,250)}${s.length>250?'…':''}</div>`).join('')}
+      </div>`;
+    wrap.appendChild(srcWrap);
+  }
+ 
+  messages.appendChild(wrap);
+  messages.scrollTop = messages.scrollHeight;
+  return wrap;
+}
+ 
+function addThinking() {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg assistant';
+  wrap.innerHTML = `<div class="msg-meta">🤖 PDF Agent</div><div class="bubble thinking"><span></span><span></span><span></span></div>`;
+  messages.appendChild(wrap);
+  messages.scrollTop = messages.scrollHeight;
+  return wrap;
+}
+ 
+function formatMd(t) {
+  return t
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>');
+}
+ 
+function showToast(type, msg) {
+  toast.style.display = 'flex';
+  toastDot.className  = 'toast-dot ' + type;
+  toastText.textContent = msg;
+}
+ 
+function fillQ(q) { qInput.value = q; qInput.focus(); }
+ 
+// Auto-resize textarea
+qInput.addEventListener('input', () => {
+  qInput.style.height = 'auto';
+  qInput.style.height = Math.min(qInput.scrollHeight, 140) + 'px';
+});
+ 
+// Clear chat
+document.getElementById('clearChatBtn').addEventListener('click', () => {
+  clearMessages();
+});
+ 
+// Load sessions on startup
+loadSessions();
+</script>
+</body>
+</html>
