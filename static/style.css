@@ -194,7 +194,7 @@ body { background: var(--bg); color: var(--text); height: 100vh; overflow: hidde
 .session-del:hover { color: var(--error); }
  
 /* RAG steps */
-.how-it-works { margin-top: auto; padding-top: 10px; }
+.how-it-works { margin-top: 0; padding-top: 10px; }
 .rag-steps { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin-top: 8px; }
 .rag-step { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text2); padding: 3px 0; }
 .rag-step-arrow { font-size: 11px; color: var(--text3); margin-left: 10px; line-height: 1; }
