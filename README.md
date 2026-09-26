@@ -1,18 +1,10 @@
-<div align="center">
+
 
 # 📄 PDF Chat Agent
 
 **An intelligent RAG-powered document Q&A system built with Flask, FAISS, and Groq LLaMA 3**
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=flat&logo=flask)](https://flask.palletsprojects.com)
-[![Groq](https://img.shields.io/badge/Groq-LLaMA_3.3_70B-F55036?style=flat)](https://groq.com)
-[![FAISS](https://img.shields.io/badge/FAISS-Vector_Search-0467DF?style=flat)](https://faiss.ai)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-*Upload any PDF → Ask natural language questions → Get grounded, accurate answers instantly*
-
-</div>
 
 ---
 
