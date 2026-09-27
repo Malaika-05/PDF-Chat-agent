@@ -1,138 +1,151 @@
 import os
-from flask import Flask, request, jsonify, render_template
+import streamlit as st
 from groq import Groq
-from rag_engine import PDFChatEngine
-from database import init_db, create_session, save_message, get_sessions, get_messages, delete_session
 from dotenv import load_dotenv
+from rag_engine import PDFChatEngine
 
-load_dotenv()
+load_dotenv()  # reads .env into os.environ for local runs; no-op on Streamlit Cloud (no .env there)
 
-app = Flask(__name__)
-app.config["UPLOAD_FOLDER"] = "uploads"
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
-
-os.makedirs("uploads", exist_ok=True)
-
-# Initialize DB and engine
-init_db()
-engine = PDFChatEngine()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+st.set_page_config(page_title="PDFChat", page_icon="📄", layout="wide")
 
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-
-# ── Get all past sessions ────────────────────────────────────────────────────
-@app.route("/sessions", methods=["GET"])
-def list_sessions():
-    return jsonify(get_sessions())
-
-
-# ── Load a past session's messages ──────────────────────────────────────────
-@app.route("/sessions/<int:session_id>/messages", methods=["GET"])
-def load_messages(session_id):
-    messages = get_messages(session_id)
-    # Try to switch engine to this session
-    loaded = engine.switch_session(session_id)
-    return jsonify({"messages": messages, "loaded": loaded})
-
-
-# ── Delete a session ─────────────────────────────────────────────────────────
-@app.route("/sessions/<int:session_id>", methods=["DELETE"])
-def remove_session(session_id):
-    delete_session(session_id)
-    if engine.active_session_id == session_id:
-        engine.active_session_id = None
-    return jsonify({"success": True})
-
-
-# ── Upload and process PDF ───────────────────────────────────────────────────
-@app.route("/upload", methods=["POST"])
-def upload_pdf():
-    if "pdf" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-
-    file = request.files["pdf"]
-    if not file.filename.endswith(".pdf"):
-        return jsonify({"error": "Only PDF files are supported"}), 400
-
-    pdf_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-    file.save(pdf_path)
-
+# ── API key: works both locally (.env) and on Streamlit Community Cloud (secrets) ──
+def get_api_key():
     try:
-        # Create DB session first to get session_id
-        temp_chunks = 0
-        session_id = create_session(file.filename, 0)
-
-        # Process PDF with session_id
-        chunk_count = engine.process_pdf(pdf_path, file.filename, session_id)
-
-        # Update chunk count in DB
-        import sqlite3
-        conn = sqlite3.connect("chat_history.db")
-        conn.execute("UPDATE sessions SET chunk_count=? WHERE id=?", (chunk_count, session_id))
-        conn.commit()
-        conn.close()
-
-        return jsonify({
-            "message": f"✅ PDF processed successfully!",
-            "filename": file.filename,
-            "chunks": chunk_count,
-            "session_id": session_id
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        if "GROQ_API_KEY" in st.secrets:
+            return st.secrets["GROQ_API_KEY"]
+    except Exception:
+        pass  # no secrets.toml present (e.g. running locally without one)
+    return os.getenv("GROQ_API_KEY")
 
 
-# ── Ask a question ───────────────────────────────────────────────────────────
-@app.route("/ask", methods=["POST"])
-def ask_question():
-    data = request.get_json()
-    question = data.get("question", "").strip()
-    session_id = data.get("session_id")
+GROQ_API_KEY = get_api_key()
+if not GROQ_API_KEY:
+    st.error(
+        "GROQ_API_KEY is not set.\n\n"
+        "- On Streamlit Community Cloud: App settings → Secrets → add `GROQ_API_KEY = \"...\"`\n"
+        "- Locally: put `GROQ_API_KEY=...` in a `.env` file"
+    )
+    st.stop()
 
-    if not question:
-        return jsonify({"error": "Question cannot be empty"}), 400
-
-    if not engine.is_ready:
-        return jsonify({"error": "Please upload a PDF first"}), 400
-
-    try:
-        relevant_chunks = engine.retrieve(question, top_k=4)
-        context = "\n\n---\n\n".join(relevant_chunks)
-
-        system_prompt = """You are a precise document assistant.
-Answer questions ONLY based on the provided context from the PDF.
-If the answer is not in the context, say: "I couldn't find this in the document."
-Be concise and clear."""
-
-        user_prompt = f"Context from PDF:\n{context}\n\nQuestion: {question}"
-
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.2,
-            max_tokens=1024
-        )
-
-        answer = response.choices[0].message.content
-
-        # Save to DB
-        if session_id:
-            save_message(session_id, "user", question)
-            save_message(session_id, "assistant", answer, relevant_chunks)
-
-        return jsonify({"answer": answer, "sources": relevant_chunks})
-
-    except Exception as e:
-        print(f"ERROR in /ask: {e}")
-        return jsonify({"error": str(e)}), 500
+client = Groq(api_key=GROQ_API_KEY)
 
 
-if __name__ == "__main__":
-    app.run(debug=True, port=5000, use_reloader=False)
+# ── Per-browser-session state (Streamlit isolates this per user automatically) ──
+if "engine" not in st.session_state:
+    st.session_state.engine = PDFChatEngine()
+if "active_doc" not in st.session_state:
+    st.session_state.active_doc = None
+if "chat_histories" not in st.session_state:
+    st.session_state.chat_histories = {}  # pdf_name -> [{"role", "content", "sources"}]
+
+engine = st.session_state.engine
+
+
+# ── Sidebar: upload + document switcher ──
+with st.sidebar:
+    st.title("📄 PDFChat")
+    st.caption("RAG-powered document Q&A")
+
+    uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
+    if uploaded_file is not None and st.button("Upload & Process PDF", use_container_width=True):
+        os.makedirs("uploads", exist_ok=True)
+        pdf_path = os.path.join("uploads", uploaded_file.name)
+        with open(pdf_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        with st.spinner("Processing PDF..."):
+            try:
+                session_id = uploaded_file.name  # filename doubles as the session key
+                chunk_count = engine.process_pdf(pdf_path, uploaded_file.name, session_id)
+                st.session_state.active_doc = session_id
+                st.session_state.chat_histories.setdefault(session_id, [])
+                st.success(f"Indexed {chunk_count} chunk(s) from {uploaded_file.name}")
+            except Exception as e:
+                st.error(f"Failed to process PDF: {e}")
+
+    st.divider()
+    st.subheader("Documents this session")
+    if engine.sessions:
+        names = list(engine.sessions.keys())
+        default_idx = names.index(st.session_state.active_doc) if st.session_state.active_doc in names else 0
+        selected = st.radio("Pick a document", names, index=default_idx, label_visibility="collapsed")
+        if selected != st.session_state.active_doc:
+            engine.switch_session(selected)
+            st.session_state.active_doc = selected
+
+        if st.button("🗑️ Delete this document", use_container_width=True):
+            engine.sessions.pop(st.session_state.active_doc, None)
+            st.session_state.chat_histories.pop(st.session_state.active_doc, None)
+            st.session_state.active_doc = None
+            st.rerun()
+    else:
+        st.caption("No documents uploaded yet.")
+
+    st.divider()
+    st.caption(
+        "⚠️ This runs in memory for your browser session only. "
+        "Refreshing the app or an app restart clears uploaded PDFs — re-upload if that happens."
+    )
+
+
+# ── Main chat area ──
+active_doc = st.session_state.active_doc
+
+if not active_doc:
+    st.info("Upload a PDF from the sidebar to get started.")
+    st.stop()
+
+st.header(active_doc)
+
+history = st.session_state.chat_histories.setdefault(active_doc, [])
+
+for msg in history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg.get("sources"):
+            with st.expander(f"{len(msg['sources'])} source chunk(s) used"):
+                for i, chunk in enumerate(msg["sources"], 1):
+                    st.markdown(f"**Chunk {i}:** {chunk}")
+
+question = st.chat_input(f'Ask anything about "{active_doc}"...')
+if question:
+    history.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    with st.chat_message("assistant"):
+        relevant_chunks = []
+        with st.spinner("Thinking..."):
+            try:
+                relevant_chunks = engine.retrieve(question, top_k=4)
+                context = "\n\n---\n\n".join(relevant_chunks)
+
+                system_prompt = (
+                    "You are a precise document assistant.\n"
+                    "Answer questions ONLY based on the provided context from the PDF.\n"
+                    'If the answer is not in the context, say: "I couldn\'t find this in the document."\n'
+                    "Be concise and clear."
+                )
+                user_prompt = f"Context from PDF:\n{context}\n\nQuestion: {question}"
+
+                response = client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                answer = response.choices[0].message.content
+            except Exception as e:
+                answer = f"⚠️ Error: {e}"
+
+        st.markdown(answer)
+        if relevant_chunks:
+            with st.expander(f"{len(relevant_chunks)} source chunk(s) used"):
+                for i, chunk in enumerate(relevant_chunks, 1):
+                    st.markdown(f"**Chunk {i}:** {chunk}")
+
+    history.append({"role": "assistant", "content": answer, "sources": relevant_chunks})
